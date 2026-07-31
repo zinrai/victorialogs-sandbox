@@ -1,0 +1,6 @@
+unauthorized_user:
+  url_prefix:
+    - http://vlselect-a:9428/
+    - http://vlselect-b:9428/
+  load_balancing_policy: first_available
+  retry_status_codes: [500, 502, 503]

@@ -1,0 +1,138 @@
+# victorialogs-sandbox / ha
+#
+# VictoriaLogs keeps no replicas inside a cluster, so availability is built a
+# layer above: two independent zones (each a minimal 1+1+1 cluster), vlagent
+# replicating every write to both and buffering for a zone that is down,
+# vmauth serving reads from the first healthy zone. See README.md.
+#
+# Host ports keep the same meaning as the cluster case: 9471 = read entry,
+# 9481 = write entry. 9472/9473 and 9482/9483 reach the zones directly for
+# observing divergence and convergence.
+
+services:
+  # ---- zone a: minimal cluster -----------------------------------------------
+  vlstorage-a:
+    image: victoriametrics/victoria-logs:v1.52.0
+    container_name: vlstorage-a
+    hostname: vlstorage-a
+    command:
+      - -storageDataPath=/vlogs
+    volumes:
+      - vlstorage-a-data:/vlogs
+    networks:
+      - vlogs-net
+
+  vlinsert-a:
+    image: victoriametrics/victoria-logs:v1.52.0
+    container_name: vlinsert-a
+    hostname: vlinsert-a
+    command:
+      - -storageNode=vlstorage-a:9428
+      - -select.disable
+    ports:
+      - "127.0.0.1:9482:9428"
+    networks:
+      - vlogs-net
+
+  vlselect-a:
+    image: victoriametrics/victoria-logs:v1.52.0
+    container_name: vlselect-a
+    hostname: vlselect-a
+    command:
+      - -storageNode=vlstorage-a:9428
+      - -insert.disable
+    ports:
+      - "127.0.0.1:9472:9428"
+    networks:
+      - vlogs-net
+
+  # ---- zone b: minimal cluster -----------------------------------------------
+  vlstorage-b:
+    image: victoriametrics/victoria-logs:v1.52.0
+    container_name: vlstorage-b
+    hostname: vlstorage-b
+    command:
+      - -storageDataPath=/vlogs
+    volumes:
+      - vlstorage-b-data:/vlogs
+    networks:
+      - vlogs-net
+
+  vlinsert-b:
+    image: victoriametrics/victoria-logs:v1.52.0
+    container_name: vlinsert-b
+    hostname: vlinsert-b
+    command:
+      - -storageNode=vlstorage-b:9428
+      - -select.disable
+    ports:
+      - "127.0.0.1:9483:9428"
+    networks:
+      - vlogs-net
+
+  vlselect-b:
+    image: victoriametrics/victoria-logs:v1.52.0
+    container_name: vlselect-b
+    hostname: vlselect-b
+    command:
+      - -storageNode=vlstorage-b:9428
+      - -insert.disable
+    ports:
+      - "127.0.0.1:9473:9428"
+    networks:
+      - vlogs-net
+
+  # ---- write entry: replicate to both zones, buffer for a down zone ----------
+  vlagent:
+    image: victoriametrics/vlagent:v1.52.0
+    container_name: vlagent
+    hostname: vlagent
+    command:
+      - -remoteWrite.url=http://vlinsert-a:9428/insert/native
+      - -remoteWrite.url=http://vlinsert-b:9428/insert/native
+      - -remoteWrite.tmpDataPath=/vlagent-buffer
+    volumes:
+      - vlagent-buffer:/vlagent-buffer
+    ports:
+      - "127.0.0.1:9481:9429"
+    networks:
+      - vlogs-net
+
+  # ---- read entry: first healthy zone answers --------------------------------
+  vmauth:
+    image: victoriametrics/vmauth:v1.148.0
+    container_name: vmauth
+    hostname: vmauth
+    command:
+      - -auth.config=/etc/vmauth.yml
+    volumes:
+      - ./config/vmauth/vmauth.yml:/etc/vmauth.yml
+    ports:
+      - "127.0.0.1:9471:8427"
+    networks:
+      - vlogs-net
+
+  # ---- Grafana: log search UI over vmauth, so failover shows in the UI -------
+  grafana:
+    image: grafana/grafana:13.1.1
+    container_name: grafana
+    hostname: grafana
+    environment:
+      GF_INSTALL_PLUGINS: victoriametrics-logs-datasource
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+    volumes:
+      - ./config/grafana/provisioning:/etc/grafana/provisioning
+    ports:
+      - "127.0.0.1:3000:3000"
+    networks:
+      - vlogs-net
+
+networks:
+  vlogs-net:
+    driver: bridge
+
+volumes:
+  vlstorage-a-data:
+  vlstorage-b-data:
+  vlagent-buffer:

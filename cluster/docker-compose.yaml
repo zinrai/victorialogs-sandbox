@@ -1,0 +1,159 @@
+# victorialogs-sandbox
+#
+# VictoriaLogs cluster: 3 vlstorage + 3 vlinsert + 3 vlselect, plus Grafana.
+# All VictoriaLogs roles run the same binary. A node with -storageNode acts as
+# vlinsert and vlselect at once, so each role is narrowed with -select.disable
+# or -insert.disable. A node without -storageNode is a vlstorage. See README.md.
+#
+# Host port bases follow the upstream cluster docs convention:
+# 947x = vlselect, 948x = vlinsert. vlstorage is not published to the host,
+# the external contract of this sandbox is the insert and select endpoints only.
+
+services:
+  # ---- vlstorage: hold the logs, no host port --------------------------------
+  vlstorage-0:
+    image: victoriametrics/victoria-logs:v1.52.0
+    container_name: vlstorage-0
+    hostname: vlstorage-0
+    command:
+      - -storageDataPath=/vlogs
+    volumes:
+      - vlstorage-0-data:/vlogs
+    networks:
+      - vlogs-net
+
+  vlstorage-1:
+    image: victoriametrics/victoria-logs:v1.52.0
+    container_name: vlstorage-1
+    hostname: vlstorage-1
+    command:
+      - -storageDataPath=/vlogs
+    volumes:
+      - vlstorage-1-data:/vlogs
+    networks:
+      - vlogs-net
+
+  vlstorage-2:
+    image: victoriametrics/victoria-logs:v1.52.0
+    container_name: vlstorage-2
+    hostname: vlstorage-2
+    command:
+      - -storageDataPath=/vlogs
+    volumes:
+      - vlstorage-2-data:/vlogs
+    networks:
+      - vlogs-net
+
+  # ---- vlinsert: write path, spreads logs across the vlstorage nodes ---------
+  vlinsert-0:
+    image: victoriametrics/victoria-logs:v1.52.0
+    container_name: vlinsert-0
+    hostname: vlinsert-0
+    command:
+      - -storageNode=vlstorage-0:9428,vlstorage-1:9428,vlstorage-2:9428
+      - -select.disable
+    ports:
+      - "127.0.0.1:9481:9428"
+    networks:
+      - vlogs-net
+
+  vlinsert-1:
+    image: victoriametrics/victoria-logs:v1.52.0
+    container_name: vlinsert-1
+    hostname: vlinsert-1
+    command:
+      - -storageNode=vlstorage-0:9428,vlstorage-1:9428,vlstorage-2:9428
+      - -select.disable
+    ports:
+      - "127.0.0.1:9482:9428"
+    networks:
+      - vlogs-net
+
+  vlinsert-2:
+    image: victoriametrics/victoria-logs:v1.52.0
+    container_name: vlinsert-2
+    hostname: vlinsert-2
+    command:
+      - -storageNode=vlstorage-0:9428,vlstorage-1:9428,vlstorage-2:9428
+      - -select.disable
+    ports:
+      - "127.0.0.1:9483:9428"
+    networks:
+      - vlogs-net
+
+  # ---- vlselect: read path, fans queries out to the vlstorage nodes ----------
+  vlselect-0:
+    image: victoriametrics/victoria-logs:v1.52.0
+    container_name: vlselect-0
+    hostname: vlselect-0
+    command:
+      - -storageNode=vlstorage-0:9428,vlstorage-1:9428,vlstorage-2:9428
+      - -insert.disable
+    ports:
+      - "127.0.0.1:9471:9428"
+    networks:
+      - vlogs-net
+
+  vlselect-1:
+    image: victoriametrics/victoria-logs:v1.52.0
+    container_name: vlselect-1
+    hostname: vlselect-1
+    command:
+      - -storageNode=vlstorage-0:9428,vlstorage-1:9428,vlstorage-2:9428
+      - -insert.disable
+    ports:
+      - "127.0.0.1:9472:9428"
+    networks:
+      - vlogs-net
+
+  vlselect-2:
+    image: victoriametrics/victoria-logs:v1.52.0
+    container_name: vlselect-2
+    hostname: vlselect-2
+    command:
+      - -storageNode=vlstorage-0:9428,vlstorage-1:9428,vlstorage-2:9428
+      - -insert.disable
+    ports:
+      - "127.0.0.1:9473:9428"
+    networks:
+      - vlogs-net
+
+  # ---- Grafana: log search UI over vlselect-0 --------------------------------
+  grafana:
+    image: grafana/grafana:13.1.1
+    container_name: grafana
+    hostname: grafana
+    environment:
+      GF_INSTALL_PLUGINS: victoriametrics-logs-datasource
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+    volumes:
+      - ./config/grafana/provisioning:/etc/grafana/provisioning
+    ports:
+      - "127.0.0.1:3000:3000"
+    networks:
+      - vlogs-net
+
+  # ---- vlogsgenerator: on-demand seeder, excluded from docker compose up ----
+  # Profile-gated so that up -d keeps producing an empty cluster instead of
+  # implicitly re-seeding on every up. Run explicitly with:
+  #   docker compose run --rm vlogsgenerator
+  # One batch over the trailing 24h (the -start/-end defaults), then it exits.
+  vlogsgenerator:
+    image: victoriametrics/vlogsgenerator:v1.22.2
+    profiles: [seed]
+    command:
+      - -addr=http://vlinsert-0:9428/insert/jsonline
+      - -activeStreams=100
+      - -logsPerStream=1000
+    networks:
+      - vlogs-net
+
+networks:
+  vlogs-net:
+    driver: bridge
+
+volumes:
+  vlstorage-0-data:
+  vlstorage-1-data:
+  vlstorage-2-data:
