@@ -13,6 +13,11 @@ The cases share host ports, so run one at a time.
 Both cases keep the same loopback contract: reads at 127.0.0.1:9471, writes at
 127.0.0.1:9481, Grafana at http://127.0.0.1:3000/.
 
+Both cases come up empty.
+[victorialogs-fixture-seed](https://github.com/zinrai/victorialogs-fixture-seed)
+seeds either one through the write entry with a deterministic corpus of
+realistic, labeled log lines.
+
 ## License
 
 This project is licensed under the [MIT License](./LICENSE).
